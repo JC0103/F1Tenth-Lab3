@@ -10,28 +10,31 @@ from sensor_msgs.msg import Image, LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
 
 #PID CONTROL PARAMS
-kp = 0.5
-kd = 0.15
-ki = 0.0001
+kp = 1.0
+kd = 0.001
+ki = 0.005
 servo_offset = 0.0
 prev_error = 0.0 
 error = 0.0
 integral = 0.0
+prev_time = 0.0
 
 #WALL FOLLOW PARAMS
 ANGLE_RANGE = 270 # Hokuyo 10LX has 270 degrees scan
 DESIRED_DISTANCE_RIGHT = 0.9 # meters
 DESIRED_DISTANCE_LEFT = 0.85
 VELOCITY = 1.5 # meters per second
-CAR_LENGTH = 0.50 # Traxxas Rally is 20 inches or 0.5 meters
+CAR_LENGTH = 1.0 # Traxxas Rally is 20 inches or 0.5 meters
 
 class WallFollow:
     """ Implement Wall Following on the car
     """
     def __init__(self):
+        global prev_time
         #Topics & Subs, Pubs
         lidarscan_topic = '/scan'
         drive_topic = '/nav'
+        prev_time = rospy.get_time()
 
         self.lidar_sub = rospy.Subscriber(lidarscan_topic, LaserScan, self.lidar_callback)
         self.drive_pub = rospy.Publisher(drive_topic, AckermannDriveStamped, queue_size = 10)
@@ -53,11 +56,15 @@ class WallFollow:
         global kp
         global ki
         global kd
+        global prev_time
         angle = 0.0
+        current_time = rospy.get_time()
+        del_time = current_time - prev_time
         #TODO: Use kp, ki & kd to implement a PID controller for 
-        integral += error
-        angle = kp * error + ki * integral + kd * (error - prev_error)
+        integral += prev_error * del_time
+        angle = kp * error + ki * integral + kd * (error - prev_error) / del_time
         prev_error = error
+        prev_time = current_time
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = rospy.Time.now()
         drive_msg.header.frame_id = "laser"
@@ -73,12 +80,11 @@ class WallFollow:
     def followLeft(self, data, leftDist):
         #Follow left wall as per the algorithm 
         #TODO:implement
-        front_scan_angle = 135
+        front_scan_angle = 125
         back_scan_angle = 180
-        teta = abs(front_scan_angle - back_scan_angle)
+        teta = math.radians(abs(front_scan_angle - back_scan_angle))
         front_scan_dist = self.getRange(data, front_scan_angle)
         back_scan_dist = self.getRange(data, back_scan_angle)
-        print("back_scan_dist:", back_scan_dist)
         alpha = math.atan2(front_scan_dist * math.cos(teta) - back_scan_dist, front_scan_dist * math.sin(teta))
         wall_dist = back_scan_dist * math.cos(alpha)
         ahead_wall_dist = wall_dist + CAR_LENGTH * math.sin(alpha)
@@ -88,7 +94,6 @@ class WallFollow:
         """ 
         """
         error = self.followLeft(data.ranges, DESIRED_DISTANCE_LEFT) #TODO: replace with error returned by followLeft
-        print("error:",error)
         #send error to pid_control
         self.pid_control(error, VELOCITY)
 
